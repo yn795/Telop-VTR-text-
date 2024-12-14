@@ -21,6 +21,7 @@
             width: 90%;
             height: 150px;
             margin-top: 20px;
+            resize: vertical;
         }
         .button {
             margin: 10px;
@@ -96,7 +97,7 @@
             await worker.initialize('jpn');
             // パラメータの最適化
             await worker.setParameters({
-                tessedit_char_whitelist: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん0123456789',
+                tessedit_char_whitelist: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789',
                 tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK
             });
             console.log("Tesseract.jsが準備できました。");
@@ -118,6 +119,9 @@
                 progress.innerText = "";
             }
         });
+
+        // フレーム処理の停止フラグ
+        let stopProcessing = false;
 
         // テキスト抽出処理
         extractButton.addEventListener("click", async () => {
@@ -160,6 +164,11 @@
 
             // フレーム処理関数
             const processFrame = async () => {
+                if (stopProcessing) {
+                    progress.innerText = "処理が中断されました。";
+                    return;
+                }
+
                 if (video.currentTime >= video.duration) {
                     // 処理が終了したら結果を結合して表示
                     ocrResult.value = ocrResults.join("\n");
