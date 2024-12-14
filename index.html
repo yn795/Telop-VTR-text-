@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>動画OCR結果表示</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+        }
+        video {
+            margin-top: 20px;
+            max-width: 90%;
+            height: auto;
+        }
+        textarea {
+            width: 90%;
+            height: 150px;
+            margin-top: 20px;
+        }
+        .button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>動画からOCR結果を抽出</h1>
+
+    <!-- 動画アップロード -->
+    <input type="file" id="videoUpload" accept="video/mp4" class="button">
+    <br>
+
+    <!-- 動画プレビュー -->
+    <video id="videoPlayer" controls>
+        お使いのブラウザは動画タグをサポートしていません。
+    </video>
+
+    <!-- テキスト出力 -->
+    <h2>OCR結果</h2>
+    <textarea id="ocrResult" readonly></textarea>
+    <br>
+    <button id="copyButton" class="button">結果をコピー</button>
+
+    <p>ご視聴ありがとうございました。</p>
+
+    <script>
+        const videoUpload = document.getElementById("videoUpload");
+        const videoPlayer = document.getElementById("videoPlayer");
+        const ocrResult = document.getElementById("ocrResult");
+        const copyButton = document.getElementById("copyButton");
+
+        // 動画アップロード処理
+        videoUpload.addEventListener("change", (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                videoPlayer.src = url;
+
+                // テスト用にOCR結果を表示 (本番ではPythonなどサーバー処理と連携)
+                ocrResult.value = "サンプルOCR結果\nここに抽出されたテキストが表示されます。";
+            }
+        });
+
+        // コピー処理
+        copyButton.addEventListener("click", () => {
+            ocrResult.select();
+            document.execCommand("copy");
+            alert("OCR結果をコピーしました！");
+        });
+    </script>
+</body>
+</html>
