@@ -3,14 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>動画OCR結果表示</title>
+    <title>ブラウザでOCRを実行</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
             text-align: center;
             margin: 20px;
         }
-        video {
+        video, canvas {
             margin-top: 20px;
             max-width: 90%;
             height: auto;
@@ -29,7 +30,7 @@
     </style>
 </head>
 <body>
-    <h1>動画からOCR結果を抽出</h1>
+    <h1>ブラウザで動画OCRを実行</h1>
 
     <!-- 動画アップロード -->
     <input type="file" id="videoUpload" accept="video/mp4" class="button">
@@ -39,6 +40,11 @@
     <video id="videoPlayer" controls>
         お使いのブラウザは動画タグをサポートしていません。
     </video>
+    <br>
+
+    <!-- テキスト抽出ボタン -->
+    <button id="extractButton" class="button" style="display: none;">テキスト抽出</button>
+    <br>
 
     <!-- テキスト出力 -->
     <h2>OCR結果</h2>
@@ -48,11 +54,16 @@
 
     <p>ご視聴ありがとうございました。</p>
 
+    <canvas id="canvas" style="display:none;"></canvas>
+
     <script>
         const videoUpload = document.getElementById("videoUpload");
         const videoPlayer = document.getElementById("videoPlayer");
+        const extractButton = document.getElementById("extractButton");
         const ocrResult = document.getElementById("ocrResult");
         const copyButton = document.getElementById("copyButton");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
 
         // 動画アップロード処理
         videoUpload.addEventListener("change", (event) => {
@@ -61,9 +72,57 @@
                 const url = URL.createObjectURL(file);
                 videoPlayer.src = url;
 
-                // テスト用にOCR結果を表示 (本番ではPythonなどサーバー処理と連携)
-                ocrResult.value = "サンプルOCR結果\nここに抽出されたテキストが表示されます。";
+                // テキスト抽出ボタンを表示
+                extractButton.style.display = "inline-block";
+
+                // 初期化
+                ocrResult.value = "";
             }
+        });
+
+        // テキスト抽出処理
+        extractButton.addEventListener("click", () => {
+            if (!videoPlayer.src) {
+                alert("動画をアップロードしてください。");
+                return;
+            }
+
+            ocrResult.value = "処理中です。少々お待ちください...";
+
+            const video = videoPlayer;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // フレームを抽出してOCR処理を実行
+            const interval = 500; // ミリ秒単位（例: 500msごとにフレーム抽出）
+            const ocrResults = [];
+
+            const processFrame = () => {
+                if (video.currentTime >= video.duration) {
+                    // 処理が終了したら結果を結合して表示
+                    ocrResult.value = ocrResults.join("\n");
+                    return;
+                }
+
+                // 現在のフレームをキャンバスに描画
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // キャンバスから画像データを取得してOCR実行
+                const imageData = canvas.toDataURL("image/png");
+                Tesseract.recognize(imageData, "jpn")
+                    .then(({ data: { text } }) => {
+                        ocrResults.push(text.trim());
+                    })
+                    .finally(() => {
+                        // 次のフレームを処理
+                        video.currentTime += interval / 1000;
+                        processFrame();
+                    });
+            };
+
+            // 動画を最初から再生
+            video.currentTime = 0;
+            processFrame();
         });
 
         // コピー処理
