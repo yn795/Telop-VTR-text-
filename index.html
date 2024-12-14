@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ブラウザでOCRを実行</title>
-    <!-- 最新版のTesseract.jsを使用 -->
+    <title>ブラウザで動画OCRを実行</title>
+    <!-- OpenCV.jsの読み込み -->
+    <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
     <style>
         body {
@@ -58,6 +59,21 @@
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
+        // OpenCV.jsのロード完了を待つ
+        let cvReady = false;
+        function onOpenCvReady() {
+            cvReady = true;
+            console.log("OpenCV.js is ready.");
+        }
+        // OpenCV.jsがロードされたらonOpenCvReadyを呼び出す
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof cv === 'undefined') {
+                console.error('Failed to load OpenCV.js');
+            } else {
+                cv['onRuntimeInitialized'] = onOpenCvReady;
+            }
+        });
+
         const videoUpload = document.getElementById("videoUpload");
         const videoPlayer = document.getElementById("videoPlayer");
         const extractButton = document.getElementById("extractButton");
@@ -99,6 +115,11 @@
                 return;
             }
 
+            if (!cvReady) {
+                alert("OpenCV.jsがまだロードされていません。少々お待ちください。");
+                return;
+            }
+
             ocrResult.value = "処理中です。少々お待ちください...";
 
             const video = videoPlayer;
@@ -130,25 +151,28 @@
                 // 現在のフレームをキャンバスに描画
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                // 画像の前処理
-                let image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                // グレースケール変換
-                for (let i = 0; i < image.data.length; i += 4) {
-                    const avg = (image.data[i] + image.data[i + 1] + image.data[i + 2]) / 3;
-                    image.data[i] = avg;
-                    image.data[i + 1] = avg;
-                    image.data[i + 2] = avg;
-                }
-                ctx.putImageData(image, 0, 0);
-
-                // コントラスト調整（簡易的な方法）
-                ctx.globalCompositeOperation = 'difference';
-                ctx.fillStyle = 'white';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.globalCompositeOperation = 'source-over';
-
                 // キャンバスから画像データを取得
-                const imageData = canvas.toDataURL("image/png");
+                let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+                // OpenCV.jsを使用した前処理
+                let src = cv.matFromImageData(imageData);
+                let gray = new cv.Mat();
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+
+                // ノイズ除去
+                let denoised = new cv.Mat();
+                cv.medianBlur(gray, denoised, 3);
+
+                // 二値化
+                let binary = new cv.Mat();
+                cv.adaptiveThreshold(denoised, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 31, 2);
+
+                // 画像データを再取得
+                cv.imshow('canvas', binary);
+                imageData = canvas.toDataURL("image/png");
+
+                // メモリ解放
+                src.delete(); gray.delete(); denoised.delete(); binary.delete();
 
                 try {
                     const { data: { text } } = await worker.recognize(imageData);
