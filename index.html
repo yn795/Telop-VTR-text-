@@ -3,99 +3,160 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ブラウザでOCRを実行</title>
-    <!-- 最新版のTesseract.jsを使用 -->
+    <title>動画OCR - 改良版</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            margin: 20px;
+            font-family: 'Hiragino Kaku Gothic ProN', 'ヒラギノ角ゴ ProN W3', Meiryo, メイリオ, Osaka, '游ゴシック', 'Yu Gothic', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            background-color: #f4f4f4;
         }
-        video, canvas {
-            margin-top: 20px;
-            max-width: 90%;
-            height: auto;
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        input[type="file"], button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        input[type="file"]:hover, button:hover {
+            background-color: #0056b3;
+        }
+        video {
+            max-width: 100%;
+            margin: 20px 0;
+            border-radius: 5px;
         }
         textarea {
-            width: 90%;
-            height: 150px;
-            margin-top: 20px;
+            width: 100%;
+            min-height: 200px;
+            margin: 20px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            resize: vertical;
         }
-        .button {
-            margin: 10px;
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
+        .progress-container {
+            width: 100%;
+            background-color: #e9ecef;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 20px;
+            background-color: #28a745;
+            border-radius: 5px;
+            transition: width 0.5s ease;
         }
     </style>
 </head>
 <body>
-    <h1>ブラウザで動画OCRを実行</h1>
+    <div class="container">
+        <h1>動画からのテキスト抽出</h1>
+        
+        <div class="controls">
+            <input type="file" id="videoUpload" accept="video/*" />
+            <button id="extractButton" disabled>テキスト抽出</button>
+        </div>
 
-    <!-- 動画アップロード -->
-    <input type="file" id="videoUpload" accept="video/mp4" class="button">
-    <br>
+        <video id="videoPlayer" controls>
+            お使いのブラウザは動画タグをサポートしていません。
+        </video>
 
-    <!-- 動画プレビュー -->
-    <video id="videoPlayer" controls>
-        お使いのブラウザは動画タグをサポートしていません。
-    </video>
-    <br>
+        <div class="progress-container">
+            <div id="progressBar" class="progress-bar"></div>
+        </div>
 
-    <!-- テキスト抽出ボタン -->
-    <button id="extractButton" class="button" style="display: none;">テキスト抽出</button>
-    <br>
+        <textarea id="ocrResult" placeholder="OCR結果がここに表示されます" readonly></textarea>
 
-    <!-- テキスト出力 -->
-    <h2>OCR結果</h2>
-    <textarea id="ocrResult" readonly></textarea>
-    <br>
-    <button id="copyButton" class="button">結果をコピー</button>
-
-    <p>ご視聴ありがとうございました。</p>
+        <div class="controls">
+            <button id="copyButton" disabled>結果をコピー</button>
+        </div>
+    </div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
-        const videoUpload = document.getElementById("videoUpload");
-        const videoPlayer = document.getElementById("videoPlayer");
-        const extractButton = document.getElementById("extractButton");
-        const ocrResult = document.getElementById("ocrResult");
-        const copyButton = document.getElementById("copyButton");
-        const canvas = document.getElementById("canvas");
-        const ctx = canvas.getContext("2d");
+        const videoUpload = document.getElementById('videoUpload');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const extractButton = document.getElementById('extractButton');
+        const ocrResult = document.getElementById('ocrResult');
+        const copyButton = document.getElementById('copyButton');
+        const canvas = document.getElementById('canvas');
+        const progressBar = document.getElementById('progressBar');
+        const ctx = canvas.getContext('2d');
 
         // Tesseractの設定
         const worker = Tesseract.createWorker({
-            langPath: 'https://tessdata.projectnaptha.com/4.0.0_best/', // 日本語データのパス
-            lang: 'jpn',
-            logger: m => console.log(m)
+            langPath: 'https://tessdata.projectnaptha.com/4.0.0_best/',
+            lang: 'jpn+eng', // 日本語と英語の両方に対応
+            logger: m => {
+                // プログレスバーの更新
+                if (m.status === 'recognizing') {
+                    const progress = m.progress * 100;
+                    progressBar.style.width = `${progress}%`;
+                }
+            }
         });
 
         // 動画アップロード処理
-        videoUpload.addEventListener("change", (event) => {
+        videoUpload.addEventListener('change', async (event) => {
             const file = event.target.files[0];
             if (file) {
                 const url = URL.createObjectURL(file);
                 videoPlayer.src = url;
 
-                // テキスト抽出ボタンを表示
-                extractButton.style.display = "inline-block";
+                // 動画のメタデータが読み込まれるのを待つ
+                await new Promise(resolve => {
+                    videoPlayer.onloadedmetadata = resolve;
+                });
+
+                // テキスト抽出ボタンを有効化
+                extractButton.disabled = false;
+                extractButton.textContent = 'テキスト抽出';
 
                 // 初期化
-                ocrResult.value = "";
+                ocrResult.value = '';
+                copyButton.disabled = true;
+                progressBar.style.width = '0%';
             }
         });
 
         // テキスト抽出処理
-        extractButton.addEventListener("click", async () => {
+        extractButton.addEventListener('click', async () => {
             if (!videoPlayer.src) {
-                alert("動画をアップロードしてください。");
+                alert('動画をアップロードしてください。');
                 return;
             }
 
-            ocrResult.value = "処理中です。少々お待ちください...";
+            extractButton.disabled = true;
+            extractButton.textContent = '処理中...';
+            ocrResult.value = '処理中です。少々お待ちください...';
+            copyButton.disabled = true;
 
             const video = videoPlayer;
             canvas.width = video.videoWidth;
@@ -103,18 +164,25 @@
 
             // Tesseractワーカーの初期化
             await worker.load();
-            await worker.loadLanguage('jpn');
-            await worker.initialize('jpn');
+            await worker.loadLanguage('jpn+eng');
+            await worker.initialize('jpn+eng');
 
-            // フレームを抽出してOCR処理を実行
-            const interval = 1000; // ミリ秒単位（例: 1000msごとにフレーム抽出）
+            const interval = 2000; // 2秒ごとにフレーム抽出
             const ocrResults = [];
 
-            const processFrame = () => {
+            const processFrame = async () => {
                 if (video.currentTime >= video.duration) {
                     // 処理が終了したら結果を結合して表示
-                    ocrResult.value = ocrResults.join("\n");
-                    worker.terminate();
+                    const cleanedResults = ocrResults
+                        .filter(text => text.trim() !== '') // 空白のエントリを除外
+                        .map(text => text.replace(/[\u200B-\u200D\uFEFF]/g, '')); // 不可視文字を削除
+
+                    ocrResult.value = cleanedResults.join('\n\n');
+                    await worker.terminate();
+
+                    extractButton.disabled = false;
+                    extractButton.textContent = 'テキスト抽出';
+                    copyButton.disabled = false;
                     return;
                 }
 
@@ -122,39 +190,40 @@
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
                 // 画像の前処理
-                let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                // グレースケール化
-                for (let i = 0; i < imageData.data.length; i += 4) {
-                    const avg = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
-                    imageData.data[i] = avg;
-                    imageData.data[i + 1] = avg;
-                    imageData.data[i + 2] = avg;
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+
+                // コントラスト強調
+                const contrast = 1.5; // コントラスト調整係数
+                for (let i = 0; i < data.length; i += 4) {
+                    data[i] = ((data[i] - 128) * contrast) + 128;
+                    data[i + 1] = ((data[i + 1] - 128) * contrast) + 128;
+                    data[i + 2] = ((data[i + 2] - 128) * contrast) + 128;
                 }
-                // 閾値処理（バイナリ化）
-                for (let i = 0; i < imageData.data.length; i += 4) {
-                    const avg = imageData.data[i];
-                    const threshold = 128;
-                    const value = avg > threshold ? 255 : 0;
-                    imageData.data[i] = value;
-                    imageData.data[i + 1] = value;
-                    imageData.data[i + 2] = value;
-                }
+
                 ctx.putImageData(imageData, 0, 0);
 
-                // キャンバスから画像データを取得してOCR実行
-                const preprocessedImage = canvas.toDataURL("image/png");
-                worker.recognize(preprocessedImage)
-                    .then(({ data: { text } }) => {
-                        ocrResults.push(text.trim());
-                    })
-                    .catch(err => {
-                        console.error("OCRエラー:", err);
-                    })
-                    .finally(() => {
-                        // 次のフレームを処理
-                        video.currentTime += interval / 1000;
-                        processFrame();
+                // OCR実行
+                try {
+                    const { data: { text } } = await worker.recognize(canvas.toDataURL('image/png'), {
+                        rectangle: { // 画面の中央部分に焦点を当てる
+                            left: canvas.width * 0.2,
+                            top: canvas.height * 0.2,
+                            width: canvas.width * 0.6,
+                            height: canvas.height * 0.6
+                        }
                     });
+
+                    if (text.trim()) {
+                        ocrResults.push(text.trim());
+                    }
+                } catch (err) {
+                    console.error('OCRエラー:', err);
+                }
+
+                // 次のフレームを処理
+                video.currentTime += interval / 1000;
+                processFrame();
             };
 
             // 動画を最初から再生
@@ -163,10 +232,10 @@
         });
 
         // コピー処理
-        copyButton.addEventListener("click", () => {
+        copyButton.addEventListener('click', () => {
             ocrResult.select();
-            document.execCommand("copy");
-            alert("OCR結果をコピーしました！");
+            document.execCommand('copy');
+            alert('OCR結果をコピーしました！');
         });
     </script>
 </body>
