@@ -12,7 +12,7 @@
             text-align: center;
             margin: 20px;
         }
-        img, canvas {
+        video, canvas {
             margin-top: 20px;
             max-width: 90%;
             height: auto;
@@ -40,12 +40,14 @@
 <body>
     <h1>日本語OCRブラウザアプリケーション</h1>
 
-    <!-- 画像アップロード -->
-    <input type="file" id="imageUpload" accept="image/*" class="button">
+    <!-- 動画アップロード -->
+    <input type="file" id="videoUpload" accept="video/mp4,video/webm" class="button">
     <br>
 
-    <!-- 画像プレビュー -->
-    <img id="uploadedImage" src="" alt="アップロードされた画像">
+    <!-- 動画プレビュー -->
+    <video id="videoPlayer" controls>
+        お使いのブラウザは動画タグをサポートしていません。
+    </video>
     <br>
 
     <!-- テキスト抽出ボタン -->
@@ -66,8 +68,8 @@
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
-        const imageUpload = document.getElementById("imageUpload");
-        const uploadedImage = document.getElementById("uploadedImage");
+        const videoUpload = document.getElementById("videoUpload");
+        const videoPlayer = document.getElementById("videoPlayer");
         const extractButton = document.getElementById("extractButton");
         const ocrResult = document.getElementById("ocrResult");
         const copyButton = document.getElementById("copyButton");
@@ -81,7 +83,8 @@
                 console.log(m);
                 // ログのステータスを表示
                 if (m.status === 'recognizing text') {
-                    progress.innerText = `OCR進行中: ${(m.progress * 100).toFixed(2)}%`;
+                    const progressPercent = (m.progress * 100).toFixed(2);
+                    progress.innerText = `OCR進行中: ${progressPercent}%`;
                 } else if (m.status === 'loaded language jpn') {
                     progress.innerText = "日本語認識の準備完了";
                 } else if (m.status === 'initialized') {
@@ -97,66 +100,104 @@
             await worker.initialize('jpn');
             // パラメータの最適化
             await worker.setParameters({
-                tessedit_char_whitelist: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789!?.,-()@#&',
+                tessedit_char_whitelist: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789!?.,-()@#&abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
                 tessedit_pageseg_mode: Tesseract.PSM.AUTO
             });
             console.log("Tesseract.jsが準備できました。");
             progress.innerText = "Tesseract.jsが準備できました。";
         })();
 
-        // 画像アップロード処理
-        imageUpload.addEventListener("change", (event) => {
+        // 動画アップロード処理
+        videoUpload.addEventListener("change", (event) => {
             const file = event.target.files[0];
             if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    uploadedImage.src = e.target.result;
-                    extractButton.style.display = "inline-block";
-                    ocrResult.value = "";
-                    progress.innerText = "";
-                }
-                reader.readAsDataURL(file);
+                const url = URL.createObjectURL(file);
+                videoPlayer.src = url;
+
+                // テキスト抽出ボタンを表示
+                extractButton.style.display = "inline-block";
+
+                // 初期化
+                ocrResult.value = "";
+                progress.innerText = "";
             }
         });
 
         // テキスト抽出処理
         extractButton.addEventListener("click", async () => {
-            if (!uploadedImage.src) {
-                alert("画像をアップロードしてください。");
+            if (!videoPlayer.src) {
+                alert("動画をアップロードしてください。");
                 return;
             }
 
             // 処理の初期化
             ocrResult.value = "処理中です。少々お待ちください...";
-            progress.innerText = "画像の前処理とOCR処理を開始します。";
+            progress.innerText = "フレーム抽出とOCR処理を開始します。";
 
-            const video = null; // 画像のみを扱うためnull
-            canvas.width = uploadedImage.width;
-            canvas.height = uploadedImage.height;
-            ctx.drawImage(uploadedImage, 0, 0, canvas.width, canvas.height);
+            const video = videoPlayer;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
 
-            // 画像データを取得
-            let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            // フレーム抽出間隔（秒）
+            const interval = 1; // 1秒ごと
 
-            // 画像前処理
-            imageData = preprocessImage(imageData);
+            const ocrResults = [];
 
-            // 前処理済み画像をキャンバスに再描画
-            ctx.putImageData(imageData, 0, 0);
+            // 動画を最初から再生
+            video.currentTime = 0;
 
-            // 前処理後の画像データを取得
-            const processedImageDataURL = canvas.toDataURL("image/png");
+            // メタデータの読み込み完了を待つ
+            await new Promise(resolve => {
+                video.onloadedmetadata = () => {
+                    resolve();
+                };
+            });
 
-            try {
-                // OCR実行
-                const { data: { text } } = await worker.recognize(processedImageDataURL);
-                ocrResult.value = text.trim();
-                progress.innerText = "OCR処理が完了しました。";
-            } catch (error) {
-                console.error("OCRエラー:", error);
-                ocrResult.value = "[OCRエラー]";
-                progress.innerText = "OCR処理中にエラーが発生しました。";
-            }
+            // 再生を停止
+            video.pause();
+
+            // フレーム処理関数
+            const processFrame = async () => {
+                if (video.currentTime >= video.duration) {
+                    // 処理が終了したら結果を結合して表示
+                    ocrResult.value = ocrResults.join("\n");
+                    progress.innerText = "OCR処理が完了しました。";
+                    await worker.terminate();
+                    return;
+                }
+
+                // フレームを描画
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // 画像データを取得
+                let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+                // 画像前処理
+                imageData = preprocessImage(imageData);
+
+                // 前処理済み画像をキャンバスに再描画
+                ctx.putImageData(imageData, 0, 0);
+
+                // 前処理後の画像データを取得
+                const processedImageDataURL = canvas.toDataURL("image/png");
+
+                try {
+                    // OCR実行
+                    const { data: { text } } = await worker.recognize(processedImageDataURL);
+                    ocrResults.push(text.trim());
+                } catch (error) {
+                    console.error("OCRエラー:", error);
+                    ocrResults.push("[OCRエラー]");
+                }
+
+                // 次のフレームを処理
+                video.currentTime += interval;
+                // 少し待ってから次のフレームを処理（UIのフリーズを防ぐ）
+                setTimeout(processFrame, 100);
+            };
+
+            // 処理を開始
+            processFrame();
         });
 
         // 画像前処理関数
