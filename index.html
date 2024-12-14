@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ブラウザで動画OCRを実行</title>
-    <!-- OpenCV.jsの読み込み -->
-    <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
+    <title>日本語OCRブラウザアプリケーション</title>
+    <!-- Tesseract.jsの読み込み -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
     <style>
         body {
@@ -29,13 +28,18 @@
             font-size: 16px;
             cursor: pointer;
         }
+        #progress {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #333;
+        }
     </style>
 </head>
 <body>
-    <h1>ブラウザで動画OCRを実行</h1>
+    <h1>日本語OCRブラウザアプリケーション</h1>
 
     <!-- 動画アップロード -->
-    <input type="file" id="videoUpload" accept="video/mp4" class="button">
+    <input type="file" id="videoUpload" accept="video/mp4,video/webm" class="button">
     <br>
 
     <!-- 動画プレビュー -->
@@ -45,8 +49,11 @@
     <br>
 
     <!-- テキスト抽出ボタン -->
-    <button id="extractButton" class="button" style="display: none;">テキスト抽出</button>
+    <button id="extractButton" class="button" style="display: none;">テキスト抽出開始</button>
     <br>
+
+    <!-- 進捗表示 -->
+    <div id="progress"></div>
 
     <!-- テキスト出力 -->
     <h2>OCR結果</h2>
@@ -59,21 +66,6 @@
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
-        // OpenCV.jsのロード完了を待つ
-        let cvReady = false;
-        function onOpenCvReady() {
-            cvReady = true;
-            console.log("OpenCV.js is ready.");
-        }
-        // OpenCV.jsがロードされたらonOpenCvReadyを呼び出す
-        document.addEventListener('DOMContentLoaded', () => {
-            if (typeof cv === 'undefined') {
-                console.error('Failed to load OpenCV.js');
-            } else {
-                cv['onRuntimeInitialized'] = onOpenCvReady;
-            }
-        });
-
         const videoUpload = document.getElementById("videoUpload");
         const videoPlayer = document.getElementById("videoPlayer");
         const extractButton = document.getElementById("extractButton");
@@ -81,16 +73,34 @@
         const copyButton = document.getElementById("copyButton");
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
+        const progress = document.getElementById("progress");
 
-        // Tesseractのインスタンスを初期化
+        // Tesseract.jsのワーカーを初期化
         const worker = Tesseract.createWorker({
-            logger: m => console.log(m) // ログをコンソールに出力
+            logger: m => {
+                console.log(m);
+                // ログのステータスを表示
+                if (m.status === 'recognizing text') {
+                    progress.innerText = `OCR進行中: ${(m.progress * 100).toFixed(2)}%`;
+                } else if (m.status === 'loaded language jpn') {
+                    progress.innerText = "日本語認識の準備完了";
+                } else if (m.status === 'initialized') {
+                    progress.innerText = "Tesseract.jsが準備できました。";
+                }
+            }
         });
 
         (async () => {
             await worker.load();
             await worker.loadLanguage('jpn');
             await worker.initialize('jpn');
+            // パラメータの最適化
+            await worker.setParameters({
+                tessedit_char_whitelist: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん0123456789',
+                tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK
+            });
+            console.log("Tesseract.jsが準備できました。");
+            progress.innerText = "Tesseract.jsが準備できました。";
         })();
 
         // 動画アップロード処理
@@ -105,6 +115,7 @@
 
                 // 初期化
                 ocrResult.value = "";
+                progress.innerText = "";
             }
         });
 
@@ -115,79 +126,172 @@
                 return;
             }
 
-            if (!cvReady) {
-                alert("OpenCV.jsがまだロードされていません。少々お待ちください。");
+            // OCRワーカーが初期化されているか確認
+            if (!worker) {
+                alert("OCRワーカーが準備できていません。少々お待ちください。");
                 return;
             }
 
+            // 処理の初期化
             ocrResult.value = "処理中です。少々お待ちください...";
+            progress.innerText = "フレーム抽出とOCR処理を開始します。";
 
             const video = videoPlayer;
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
 
-            // フレームを抽出してOCR処理を実行
-            const interval = 1000; // ミリ秒単位（例: 1000msごとにフレーム抽出）
+            // フレーム抽出間隔（秒）
+            const interval = 1; // 1秒ごと
+
             const ocrResults = [];
 
             // 動画を最初から再生
             video.currentTime = 0;
 
-            // 動画のメタデータが読み込まれるのを待つ
+            // メタデータの読み込み完了を待つ
             await new Promise(resolve => {
                 video.onloadedmetadata = () => {
                     resolve();
                 };
             });
 
+            // 再生を停止
+            video.pause();
+
+            // フレーム処理関数
             const processFrame = async () => {
                 if (video.currentTime >= video.duration) {
                     // 処理が終了したら結果を結合して表示
                     ocrResult.value = ocrResults.join("\n");
+                    progress.innerText = "OCR処理が完了しました。";
                     await worker.terminate();
                     return;
                 }
 
-                // 現在のフレームをキャンバスに描画
+                // フレームを描画
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                // キャンバスから画像データを取得
+                // 画像データを取得
                 let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-                // OpenCV.jsを使用した前処理
-                let src = cv.matFromImageData(imageData);
-                let gray = new cv.Mat();
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+                // 画像前処理
+                imageData = preprocessImage(imageData);
 
-                // ノイズ除去
-                let denoised = new cv.Mat();
-                cv.medianBlur(gray, denoised, 3);
+                // 前処理済み画像をキャンバスに描画
+                ctx.putImageData(imageData, 0, 0);
 
-                // 二値化
-                let binary = new cv.Mat();
-                cv.adaptiveThreshold(denoised, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 31, 2);
-
-                // 画像データを再取得
-                cv.imshow('canvas', binary);
-                imageData = canvas.toDataURL("image/png");
-
-                // メモリ解放
-                src.delete(); gray.delete(); denoised.delete(); binary.delete();
+                // 画像データを取得
+                const processedImageDataURL = canvas.toDataURL("image/png");
 
                 try {
-                    const { data: { text } } = await worker.recognize(imageData);
+                    // OCR実行
+                    const { data: { text } } = await worker.recognize(processedImageDataURL);
                     ocrResults.push(text.trim());
                 } catch (error) {
                     console.error("OCRエラー:", error);
+                    ocrResults.push("[OCRエラー]");
                 }
 
                 // 次のフレームを処理
-                video.currentTime += interval / 1000;
-                await processFrame();
+                video.currentTime += interval;
+                // 少し待ってから次のフレームを処理（UIのフリーズを防ぐ）
+                setTimeout(processFrame, 100);
             };
 
+            // 処理を開始
             processFrame();
         });
+
+        // 画像前処理関数
+        function preprocessImage(imageData) {
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+
+            // グレースケール変換
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                // 人間の目に近い輝度計算
+                const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                data[i] = data[i + 1] = data[i + 2] = gray;
+            }
+
+            // ノイズ除去（メディアンフィルタ）
+            const tempData = new Uint8ClampedArray(data); // 一時データ保持
+            const kernelSize = 3;
+            const half = Math.floor(kernelSize / 2);
+
+            for (let y = half; y < height - half; y++) {
+                for (let x = half; x < width - half; x++) {
+                    const neighbors = [];
+                    for (let ky = -half; ky <= half; ky++) {
+                        for (let kx = -half; kx <= half; kx++) {
+                            const index = ((y + ky) * width + (x + kx)) * 4;
+                            neighbors.push(tempData[index]);
+                        }
+                    }
+                    neighbors.sort((a, b) => a - b);
+                    const median = neighbors[Math.floor(neighbors.length / 2)];
+                    const idx = (y * width + x) * 4;
+                    data[idx] = data[idx + 1] = data[idx + 2] = median;
+                }
+            }
+
+            // 二値化（大津の方法）
+            const threshold = otsuThreshold(data, width, height);
+            for (let i = 0; i < data.length; i += 4) {
+                const val = data[i] > threshold ? 255 : 0;
+                data[i] = data[i + 1] = data[i + 2] = val;
+            }
+
+            // 画像の拡大（解像度向上）
+            const scaledCanvas = document.createElement('canvas');
+            const scaledCtx = scaledCanvas.getContext('2d');
+            const scaleFactor = 2; // 2倍に拡大
+            scaledCanvas.width = width * scaleFactor;
+            scaledCanvas.height = height * scaleFactor;
+            scaledCtx.drawImage(canvas, 0, 0, width, height, 0, 0, scaledCanvas.width, scaledCanvas.height);
+            const scaledImageData = scaledCtx.getImageData(0, 0, scaledCanvas.width, scaledCanvas.height);
+
+            return scaledImageData;
+        }
+
+        // 大津の方法による閾値計算
+        function otsuThreshold(data, width, height) {
+            const histogram = new Array(256).fill(0);
+            for (let i = 0; i < data.length; i += 4) {
+                histogram[data[i]]++;
+            }
+
+            const total = width * height;
+            let sum = 0;
+            for (let t = 0; t < 256; t++) sum += t * histogram[t];
+
+            let sumB = 0;
+            let wB = 0;
+            let wF = 0;
+
+            let varMax = 0;
+            let threshold = 0;
+
+            for (let t = 0; t < 256; t++) {
+                wB += histogram[t];
+                if (wB === 0) continue;
+                wF = total - wB;
+                if (wF === 0) break;
+                sumB += t * histogram[t];
+                const mB = sumB / wB;
+                const mF = (sum - sumB) / wF;
+                const varBetween = wB * wF * (mB - mF) * (mB - mF);
+                if (varBetween > varMax) {
+                    varMax = varBetween;
+                    threshold = t;
+                }
+            }
+            return threshold;
+        }
 
         // コピー処理
         copyButton.addEventListener("click", () => {
