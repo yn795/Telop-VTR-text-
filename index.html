@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ブラウザで日本語字幕抽出</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.3/dist/tesseract.min.js"></script>
+  <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
 </head>
 <body>
   <h1>日本語字幕抽出ツール</h1>
@@ -24,6 +25,8 @@
     <h2>抽出された字幕</h2>
     <pre id="subtitle-text"></pre>
   </section>
+
+  <button id="capture-btn" style="margin-top: 20px;" onclick="captureAndCopyPage()">このページをコピー</button>
 
   <script>
     async function processVideo() {
@@ -106,6 +109,31 @@
       const subtitleText = document.getElementById('subtitle-text');
       subtitleText.innerText = subtitles.map((s) => `${s.timestamp}秒: ${s.text}`).join('\n');
       document.getElementById('text-section').style.display = 'block';
+    }
+
+    async function captureAndCopyPage() {
+      const captureBtn = document.getElementById('capture-btn');
+      captureBtn.disabled = true;
+
+      const page = document.body;
+
+      // html2canvasでスクリーンショットを撮る
+      try {
+        const canvas = await html2canvas(page);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+
+        // クリップボードに画像をコピー
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob })
+        ]);
+
+        alert('このページのスクリーンショットをコピーしました！');
+      } catch (error) {
+        console.error('スクリーンショットエラー:', error);
+        alert('スクリーンショットのコピーに失敗しました。');
+      } finally {
+        captureBtn.disabled = false;
+      }
     }
   </script>
 </body>
