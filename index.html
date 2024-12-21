@@ -44,7 +44,7 @@
       video.load();
 
       video.onloadeddata = async () => {
-        const frames = await extractFrames(video, 2); // 2秒ごとにフレーム抽出
+        const frames = await extractFrames(video, 3); // 3秒ごとにフレーム抽出
         displayFrames(frames);
         const subtitles = await extractTextFromFrames(frames);
         displaySubtitles(subtitles);
@@ -100,7 +100,7 @@
         const text = await Tesseract.recognize(frames[i], 'jpn', { logger: (info) => console.log(info) });
         const cleanedText = text.data.text.replace(/\s+/g, ' ').trim(); // 不自然な改行を削除
         if (cleanedText) {
-          subtitles.push({ timestamp: i * 2, text: cleanedText }); // 2秒間隔のタイムスタンプ
+          subtitles.push({ timestamp: i * 3, text: cleanedText }); // 3秒間隔のタイムスタンプ
         }
       }
       return subtitles;
