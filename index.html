@@ -6,6 +6,9 @@
   <title>ブラウザで日本語字幕抽出</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.3/dist/tesseract.min.js"></script>
   <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <!-- 必要に応じてOCR結果の変換ライブラリ（例：OpenCCなど）の導入もご検討ください -->
 </head>
 <body>
   <h1>日本語字幕抽出ツール</h1>
@@ -26,8 +29,8 @@
     <pre id="subtitle-text"></pre>
   </section>
 
-  <button id="capture-btn" style="margin-top: 20px;" onclick="captureAndCopyPage()">このページをコピー</button>
-  <a href="https://keep.google.com/" target="_blank" style="margin-left: 10px; text-decoration: none; color: blue;">Google Keepを開く</a>
+  <button id="capture-btn" style="margin-top:20px;" onclick="captureAndCopyPage()">このページをコピー</button>
+  <a href="https://keep.google.com/" target="_blank" style="margin-left:10px; text-decoration:none; color:blue;">Google Keepを開く</a>
 
   <script>
     async function processVideo() {
@@ -44,8 +47,11 @@
       video.load();
 
       video.onloadeddata = async () => {
-        const frames = await extractFrames(video, 3); // 3秒ごとにフレーム抽出
+        // 1.5秒ごとにフレーム抽出
+        const frames = await extractFrames(video, 1.5);
         displayFrames(frames);
+        // 抽出した静止画を自動で一括ダウンロード
+        downloadFramesZip(frames);
         const subtitles = await extractTextFromFrames(frames);
         displaySubtitles(subtitles);
       };
@@ -94,13 +100,59 @@
       document.getElementById('frames-section').style.display = 'block';
     }
 
+    async function downloadFramesZip(frames) {
+      const zip = new JSZip();
+      frames.forEach((frame, index) => {
+        // データURLからbase64部分を抽出してZIPに追加
+        const base64Data = frame.split(',')[1];
+        zip.file(`frame_${index}.png`, base64Data, { base64: true });
+      });
+      const content = await zip.generateAsync({ type: 'blob' });
+      saveAs(content, 'frames.zip');
+    }
+
+    // OCR前に画像処理を実施して精度向上を図る
+    async function preprocessImage(dataURL) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          // グレースケール変換
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          for (let i = 0; i < imageData.data.length; i += 4) {
+            const avg = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
+            imageData.data[i] = avg;
+            imageData.data[i + 1] = avg;
+            imageData.data[i + 2] = avg;
+          }
+          ctx.putImageData(imageData, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.src = dataURL;
+      });
+    }
+
     async function extractTextFromFrames(frames) {
       const subtitles = [];
       for (let i = 0; i < frames.length; i++) {
-        const text = await Tesseract.recognize(frames[i], 'jpn', { logger: (info) => console.log(info) });
-        const cleanedText = text.data.text.replace(/\s+/g, ' ').trim(); // 不自然な改行を削除
+        // 前処理によりOCR精度向上を図る
+        const preprocessedFrame = await preprocessImage(frames[i]);
+        const result = await Tesseract.recognize(
+          preprocessedFrame,
+          'jpn',
+          {
+            logger: (info) => console.log(info),
+            tessedit_pageseg_mode: 7, // 単一行モードで字幕抽出
+            tessedit_char_whitelist: 'ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんァアィイゥェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチツテトナニヌネノハバパヒビピフブプヘベペホボポマミムメモヤユヨラリルレロわヲンー「」、。！？'
+          }
+        );
+        const cleanedText = result.data.text.replace(/\s+/g, ' ').trim();
         if (cleanedText) {
-          subtitles.push({ timestamp: i * 3, text: cleanedText }); // 3秒間隔のタイムスタンプ
+          subtitles.push({ timestamp: i * 1.5, text: cleanedText });
         }
       }
       return subtitles;
@@ -117,17 +169,12 @@
       captureBtn.disabled = true;
 
       const page = document.body;
-
-      // html2canvasでスクリーンショットを撮る
       try {
         const canvas = await html2canvas(page);
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-
-        // クリップボードに画像をコピー
         await navigator.clipboard.write([
           new ClipboardItem({ 'image/png': blob })
         ]);
-
         alert('このページのスクリーンショットをコピーしました！');
       } catch (error) {
         console.error('スクリーンショットエラー:', error);
